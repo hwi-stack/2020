@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isValidStaff(data) {
+      return data.keys().hasAll(['id', 'name']) &&
+             data.keys().hasOnly(['id', 'name']) &&
+             data.id is string && data.id.size() > 0 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 50;
+    }
+
+    function isValidWinner(data) {
+      return data.keys().hasAll(['id', 'staffId', 'name', 'prizeId', 'prizeName', 'drawnAt']) &&
+             data.keys().hasOnly(['id', 'staffId', 'name', 'prizeId', 'prizeName', 'drawnAt']) &&
+             data.id is string && data.staffId is string &&
+             data.name is string && data.name.size() > 0 &&
+             data.prizeId is string &&
+             data.prizeName is string &&
+             data.drawnAt is string;
+    }
+
+    function isValidPrize(data) {
+      return data.keys().hasAll(['id', 'name', 'count', 'colorTheme', 'accentBg']) &&
+             data.keys().hasOnly(['id', 'name', 'count', 'colorTheme', 'accentBg']) &&
+             data.id is string &&
+             data.name is string &&
+             data.count is number && data.count > 0;
+    }
+
+    match /staff/{staffId} {
+      allow read: if true;
+      allow create, update: if isValidStaff(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /winners/{winnerId} {
+      allow read: if true;
+      allow create, update: if isValidWinner(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /prizes/{prizeId} {
+      allow read: if true;
+      allow create, update: if isValidPrize(request.resource.data);
+      allow delete: if true;
+    }
+  }
+}

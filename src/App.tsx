@@ -3,6 +3,15 @@ import { StaffMember, WinnerRecord, Prize } from './types';
 import { getDefaultStaffList } from './data/defaultStaff';
 import { LotteryDraw } from './components/LotteryDraw';
 import { AdminModal } from './components/AdminModal';
+import {
+  testFirestoreConnection,
+  subscribeToStaff,
+  subscribeToWinners,
+  syncStaffListToFirestore,
+  saveWinnersToFirestore,
+  deleteWinnerFromFirestore,
+  resetWinnersInFirestore,
+} from './firebase';
 
 const DEFAULT_PRIZES: Prize[] = [
   {
@@ -22,7 +31,7 @@ const DEFAULT_PRIZES: Prize[] = [
 ];
 
 export default function App() {
-  // Staff list in localStorage
+  // Staff list (initialized with localStorage or defaults, then synced via Firebase Firestore in real-time)
   const [staffList, setStaffList] = useState<StaffMember[]>(() => {
     try {
       const saved = localStorage.getItem('suwon_rehab_staff_list');
@@ -36,7 +45,7 @@ export default function App() {
     return getDefaultStaffList();
   });
 
-  // Winner records in localStorage
+  // Winner records
   const [winners, setWinners] = useState<WinnerRecord[]>(() => {
     try {
       const saved = localStorage.getItem('suwon_rehab_winners');
@@ -50,7 +59,7 @@ export default function App() {
     return [];
   });
 
-  // Prizes in localStorage
+  // Prizes
   const [prizes, setPrizes] = useState<Prize[]>(() => {
     try {
       const saved = localStorage.getItem('suwon_rehab_prizes');
@@ -64,32 +73,114 @@ export default function App() {
     return DEFAULT_PRIZES;
   });
 
-  // Admin modal state
+  // Firebase connection & sync status
+  const [isFirebaseConnected, setIsFirebaseConnected] = useState<boolean>(true);
+  const [lastSyncTime, setLastSyncTime] = useState<string>('연결 중...');
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
 
-  // Sync to localStorage
+  // Initialize Firebase and subscribe to real-time Firestore changes
   useEffect(() => {
-    localStorage.setItem('suwon_rehab_staff_list', JSON.stringify(staffList));
-  }, [staffList]);
+    testFirestoreConnection().then(connected => {
+      setIsFirebaseConnected(connected);
+      if (connected) {
+        setLastSyncTime(new Date().toLocaleTimeString('ko-KR'));
+      }
+    });
 
-  useEffect(() => {
-    localStorage.setItem('suwon_rehab_winners', JSON.stringify(winners));
-  }, [winners]);
+    // Real-time Firestore listener for staff
+    const unsubscribeStaff = subscribeToStaff(
+      remoteStaff => {
+        if (remoteStaff.length > 0) {
+          setStaffList(remoteStaff);
+          localStorage.setItem('suwon_rehab_staff_list', JSON.stringify(remoteStaff));
+        }
+        setIsFirebaseConnected(true);
+        setLastSyncTime(new Date().toLocaleTimeString('ko-KR'));
+      },
+      () => {
+        setIsFirebaseConnected(false);
+      }
+    );
 
-  useEffect(() => {
-    localStorage.setItem('suwon_rehab_prizes', JSON.stringify(prizes));
-  }, [prizes]);
+    // Real-time Firestore listener for winners
+    const unsubscribeWinners = subscribeToWinners(
+      remoteWinners => {
+        setWinners(remoteWinners);
+        localStorage.setItem('suwon_rehab_winners', JSON.stringify(remoteWinners));
+        setIsFirebaseConnected(true);
+        setLastSyncTime(new Date().toLocaleTimeString('ko-KR'));
+      },
+      () => {
+        setIsFirebaseConnected(false);
+      }
+    );
 
-  const handleAddWinners = (newWinners: WinnerRecord[]) => {
-    setWinners(prev => [...prev, ...newWinners]);
+    return () => {
+      unsubscribeStaff();
+      unsubscribeWinners();
+    };
+  }, []);
+
+  // Update staff list (called by AdminModal)
+  const handleUpdateStaffList = async (newList: StaffMember[]) => {
+    setStaffList(newList);
+    localStorage.setItem('suwon_rehab_staff_list', JSON.stringify(newList));
+
+    try {
+      await syncStaffListToFirestore(newList);
+      setLastSyncTime(new Date().toLocaleTimeString('ko-KR'));
+      setIsFirebaseConnected(true);
+    } catch (err) {
+      console.error('Failed to sync staff list to Firebase Firestore', err);
+      setIsFirebaseConnected(false);
+    }
   };
 
-  const handleDeleteWinner = (winnerId: string) => {
-    setWinners(prev => prev.filter(w => w.id !== winnerId));
+  // Add winners (called when draw completes)
+  const handleAddWinners = async (newWinners: WinnerRecord[]) => {
+    const updated = [...winners, ...newWinners];
+    setWinners(updated);
+    localStorage.setItem('suwon_rehab_winners', JSON.stringify(updated));
+
+    try {
+      await saveWinnersToFirestore(newWinners);
+      setLastSyncTime(new Date().toLocaleTimeString('ko-KR'));
+    } catch (err) {
+      console.error('Failed to sync winners to Firebase Firestore', err);
+    }
   };
 
-  const handleResetWinners = () => {
+  // Delete single winner
+  const handleDeleteWinner = async (winnerId: string) => {
+    const updated = winners.filter(w => w.id !== winnerId);
+    setWinners(updated);
+    localStorage.setItem('suwon_rehab_winners', JSON.stringify(updated));
+
+    try {
+      await deleteWinnerFromFirestore(winnerId);
+      setLastSyncTime(new Date().toLocaleTimeString('ko-KR'));
+    } catch (err) {
+      console.error('Failed to delete winner from Firebase Firestore', err);
+    }
+  };
+
+  // Reset all winners
+  const handleResetWinners = async () => {
     setWinners([]);
+    localStorage.setItem('suwon_rehab_winners', JSON.stringify([]));
+
+    try {
+      await resetWinnersInFirestore();
+      setLastSyncTime(new Date().toLocaleTimeString('ko-KR'));
+    } catch (err) {
+      console.error('Failed to reset winners in Firebase Firestore', err);
+    }
+  };
+
+  // Update prizes
+  const handleUpdatePrizes = (newPrizes: Prize[]) => {
+    setPrizes(newPrizes);
+    localStorage.setItem('suwon_rehab_prizes', JSON.stringify(newPrizes));
   };
 
   return (
@@ -109,12 +200,14 @@ export default function App() {
         isOpen={isAdminOpen}
         onClose={() => setIsAdminOpen(false)}
         staffList={staffList}
-        onUpdateStaffList={setStaffList}
+        onUpdateStaffList={handleUpdateStaffList}
         winners={winners}
         onDeleteWinner={handleDeleteWinner}
         onResetWinners={handleResetWinners}
         prizes={prizes}
-        onUpdatePrizes={setPrizes}
+        onUpdatePrizes={handleUpdatePrizes}
+        isServerConnected={isFirebaseConnected}
+        lastSyncTime={lastSyncTime}
       />
     </div>
   );

@@ -1,0 +1,55 @@
+{
+  "entities": {
+    "StaffMember": {
+      "title": "Staff Member",
+      "description": "A staff member of Suwon Community Welfare Center for the Disabled",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "name": { "type": "string", "description": "Full name of the staff member" }
+      },
+      "required": ["id", "name"]
+    },
+    "WinnerRecord": {
+      "title": "Winner Record",
+      "description": "Record of a lottery prize winner",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "staffId": { "type": "string", "description": "Reference to staff member" },
+        "name": { "type": "string", "description": "Name of the winning staff member" },
+        "prizeId": { "type": "string", "description": "Identifier of the prize won" },
+        "prizeName": { "type": "string", "description": "Name of the prize won" },
+        "drawnAt": { "type": "string", "description": "Timestamp string of the draw" }
+      },
+      "required": ["id", "staffId", "name", "prizeId", "prizeName", "drawnAt"]
+    },
+    "Prize": {
+      "title": "Prize",
+      "description": "A lottery prize definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "name": { "type": "string", "description": "Name of the prize" },
+        "count": { "type": "number", "description": "Number of winners to draw" },
+        "colorTheme": { "type": "string", "description": "CSS color theme class" },
+        "accentBg": { "type": "string", "description": "Accent background class" }
+      },
+      "required": ["id", "name", "count", "colorTheme", "accentBg"]
+    }
+  },
+  "firestore": {
+    "/staff/{staffId}": {
+      "schema": "StaffMember",
+      "description": "Collection of staff members eligible for the lottery"
+    },
+    "/winners/{winnerId}": {
+      "schema": "WinnerRecord",
+      "description": "Collection of winners drawn in the lottery"
+    },
+    "/prizes/{prizeId}": {
+      "schema": "Prize",
+      "description": "Collection of prizes configured for the lottery"
+    }
+  }
+}

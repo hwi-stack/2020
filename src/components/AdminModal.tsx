@@ -15,7 +15,10 @@ import {
   Upload,
   AlertCircle,
   FileSpreadsheet,
-  CheckCircle
+  CheckCircle,
+  RefreshCw,
+  Download,
+  Cloud
 } from 'lucide-react';
 
 interface AdminModalProps {
@@ -28,6 +31,9 @@ interface AdminModalProps {
   onResetWinners: () => void;
   prizes: Prize[];
   onUpdatePrizes: (newPrizes: Prize[]) => void;
+  isServerConnected?: boolean;
+  lastSyncTime?: string;
+  onForceSync?: () => void;
 }
 
 export const AdminModal: React.FC<AdminModalProps> = ({
@@ -40,6 +46,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onResetWinners,
   prizes,
   onUpdatePrizes,
+  isServerConnected = true,
+  lastSyncTime = '',
+  onForceSync,
 }) => {
   // Authentication state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -73,6 +82,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   // Bulk add
   const [bulkInput, setBulkInput] = useState<string>('');
   const [bulkMessage, setBulkMessage] = useState<string>('');
+  const [replaceExistingInBulk, setReplaceExistingInBulk] = useState<boolean>(false);
 
   // Copy notification
   const [copiedNotice, setCopiedNotice] = useState<boolean>(false);
@@ -150,7 +160,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       .map(n => n.trim())
       .filter(n => n.length > 0);
 
-    const existingNames = new Set(staffList.map(s => s.name));
+    const existingNames = replaceExistingInBulk ? new Set<string>() : new Set(staffList.map(s => s.name));
     const addedMembers: StaffMember[] = [];
     let duplicateCount = 0;
 
@@ -166,14 +176,42 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       }
     });
 
-    onUpdateStaffList([...staffList, ...addedMembers]);
-    setBulkMessage(
-      `총 ${addedMembers.length}명이 추가되었습니다.${
-        duplicateCount > 0 ? ` (중복 ${duplicateCount}명 제외)` : ''
-      }`
-    );
+    if (replaceExistingInBulk) {
+      onUpdateStaffList(addedMembers);
+      setBulkMessage(
+        `기존 명단을 비우고 새로운 명단 ${addedMembers.length}명이 등록되었습니다.${
+          duplicateCount > 0 ? ` (중복 ${duplicateCount}명 제외)` : ''
+        }`
+      );
+      showToast(`명단 ${addedMembers.length}명 새로 등록 완료`);
+    } else {
+      onUpdateStaffList([...staffList, ...addedMembers]);
+      setBulkMessage(
+        `총 ${addedMembers.length}명이 추가되었습니다.${
+          duplicateCount > 0 ? ` (중복 ${duplicateCount}명 제외)` : ''
+        }`
+      );
+      showToast(`명단 ${addedMembers.length}명 일괄 등록 완료`);
+    }
     setBulkInput('');
-    showToast(`명단 ${addedMembers.length}명 일괄 등록 완료`);
+  };
+
+  // Clear all staff from list
+  const handleClearAllStaff = () => {
+    if (staffList.length === 0) {
+      showToast('삭제할 직원 명단이 없습니다.');
+      return;
+    }
+    setConfirmDialog({
+      title: '전체 직원 명단 삭제',
+      message: `현재 등록된 전체 ${staffList.length}명의 직원 명단을 모두 삭제하시겠습니까? 삭제 후 일괄 등록(붙여넣기)으로 새 명단을 넣거나 초기 90명을 다시 복구할 수 있습니다.`,
+      confirmButtonText: '전체 삭제',
+      onConfirm: () => {
+        onUpdateStaffList([]);
+        setConfirmDialog(null);
+        showToast('전체 직원 명단이 삭제되었습니다.');
+      },
+    });
   };
 
   // Reset to default 90 staff via custom React dialog
@@ -220,6 +258,20 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     setCopiedNotice(true);
     showToast('당첨자 명단이 클립보드에 복사되었습니다.');
     setTimeout(() => setCopiedNotice(false), 2500);
+  };
+
+  // Download staff list as txt/csv file
+  const handleDownloadStaff = () => {
+    if (staffList.length === 0) return;
+    const content = staffList.map((s, idx) => `${idx + 1}\t${s.name}`).join('\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `수원시장애인종합복지관_직원명단_${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('직원 명단 파일이 다운로드되었습니다.');
   };
 
   // Filter staff by search query
@@ -409,21 +461,57 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 )}
 
                 {/* Search & Actions Bar */}
-                <div className="flex items-center justify-between gap-3">
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    placeholder="성명 검색..."
-                    className="w-48 sm:w-64 px-3 py-1.5 rounded-lg border border-slate-200 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                  <button
-                    onClick={handleResetToDefault}
-                    className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-amber-700 bg-slate-100 hover:bg-amber-50 px-3 py-1.5 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-amber-200"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    초기 90명 명단 복구
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="성명 검색..."
+                      className="w-36 sm:w-56 px-3 py-1.5 rounded-lg border border-slate-200 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                    <div className="hidden sm:flex items-center gap-1.5 text-xs text-amber-900 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                      <Cloud className="w-3.5 h-3.5 text-amber-600" />
+                      <span className="font-semibold">Firebase 클라우드 연동됨</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {onForceSync && (
+                      <button
+                        onClick={onForceSync}
+                        className="flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-amber-700 bg-slate-100 hover:bg-amber-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-amber-200"
+                        title="서버 데이터 즉시 동기화"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">동기화</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={handleDownloadStaff}
+                      className="flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-amber-700 bg-slate-100 hover:bg-amber-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-amber-200"
+                      title="직원 명단 텍스트 파일로 다운로드"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">명단 백업</span>
+                    </button>
+                    <button
+                      onClick={handleResetToDefault}
+                      className="flex items-center gap-1 text-xs font-semibold text-slate-600 hover:text-amber-700 bg-slate-100 hover:bg-amber-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-amber-200"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">초기 90명 복구</span>
+                    </button>
+                    <button
+                      onClick={handleClearAllStaff}
+                      disabled={staffList.length === 0}
+                      className="flex items-center gap-1 text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer border border-rose-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="전체 직원 명단 삭제"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                      <span className="hidden sm:inline">전체 명단 삭제</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Staff List Table */}
@@ -538,13 +626,34 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   </div>
                 )}
 
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    onClick={handleBulkImport}
-                    className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-sm shadow-md transition-colors cursor-pointer"
-                  >
-                    일괄 등록 적용
-                  </button>
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={replaceExistingInBulk}
+                      onChange={e => setReplaceExistingInBulk(e.target.checked)}
+                      className="w-4 h-4 text-amber-500 rounded border-slate-300 focus:ring-amber-500 cursor-pointer"
+                    />
+                    <span>기존 명단을 모두 지우고 이 명단으로 새로 등록하기</span>
+                  </label>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleClearAllStaff}
+                      disabled={staffList.length === 0}
+                      className="px-3.5 py-2 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl font-bold text-xs transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      전체 명단 비우기
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleBulkImport}
+                      className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-sm shadow-md transition-colors cursor-pointer"
+                    >
+                      {replaceExistingInBulk ? '기존 명단 대체 등록' : '일괄 등록 적용'}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
