@@ -93,7 +93,10 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 antialiased selection:bg-amber-200">
+    <div
+      className="min-h-screen bg-slate-50 font-sans text-slate-900 antialiased selection:bg-amber-200 notranslate"
+      translate="no"
+    >
       <LotteryDraw
         staffList={staffList}
         winners={winners}
